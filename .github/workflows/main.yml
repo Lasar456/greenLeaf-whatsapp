@@ -1,0 +1,88 @@
+
+name: Build GreenLeaf Native Smooth APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    name: Flutter Android Debug APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout project files
+        uses: actions/checkout@v4
+
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install stable Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android platform files
+        run: |
+          flutter create . --platforms=android --org in.greenleaf --project-name greenleaf_native
+
+      - name: Set app name and launcher icon
+        shell: bash
+        run: |
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import re, shutil
+
+          path = Path('android/app/src/main/AndroidManifest.xml')
+          data = path.read_text(encoding='utf-8')
+          data = re.sub(
+              r'android:label="[^"]*"',
+              'android:label="GreenLeaf"',
+              data,
+              count=1
+          )
+          path.write_text(data, encoding='utf-8')
+
+          for dpi in ('mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'):
+              source = Path(f'branding/ic_launcher_{dpi}.png')
+              target = Path(
+                  f'android/app/src/main/res/mipmap-{dpi}/ic_launcher.png'
+              )
+              if source.is_file():
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(source, target)
+          PYTHON
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Verify project files
+        run: |
+          test -s lib/main.dart
+          test -s pubspec.yaml
+          grep -q 'GreenLeafShell' lib/main.dart
+
+      - name: Build Android APK
+        run: flutter build apk --debug
+
+      - name: Verify APK exists
+        run: |
+          test -s build/app/outputs/flutter-apk/app-debug.apk
+          ls -lh build/app/outputs/flutter-apk/app-debug.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: GreenLeaf-Native-Smooth-S25-APK
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
